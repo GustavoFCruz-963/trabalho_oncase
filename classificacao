@@ -1,0 +1,141 @@
+### Classificação
+
+###Carrega os dados
+df_class <- fread("/dados/gustavo_cruz/novo/classification_train.csv",
+                  sep = ",", dec = ".")
+
+df_class_test <- fread("/dados/gustavo_cruz/novo/classification_test.csv",
+                       sep = ",", dec = ".")
+
+##Verificando a disposição dos dados
+df_class %>% skim
+
+##3tabela de correlações --- é possível verificar que x1 tem correlação positiva em 
+##relação à variavel target, assim como x2 tem correlação negativa
+##isso terá impacto na decisao do modelo de classificação
+cor(df_class)
+
+##verificando se os dados estão desbalanceados, via tabela de frequencias
+table(df_class$target)
+
+##Aplicando um modelo de regressão logistica, considerando a natureza da variavel target,
+## e também por ser um modelo com boa performance para datasets com baixo
+##número de linhas e de colunas
+model_class <- glm(target ~ x1+x2, df_class, family = "binomial")
+
+##resumo
+summary(model_class)
+Call:
+glm(formula = target ~ x1 + x2, family = "binomial", data = df_class)
+
+Deviance Residuals: 
+     Min        1Q    Median        3Q       Max  
+-2.80332  -0.49149   0.07058   0.51723   2.51267  
+
+Coefficients:
+            Estimate Std. Error z value Pr(>|z|)    
+(Intercept)   0.4625     0.1545   2.993  0.00276 ** 
+x1            1.1763     0.1380   8.525  < 2e-16 ***
+x2           -3.5813     0.3134 -11.427  < 2e-16 ***
+---
+Signif. codes:  
+0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+(Dispersion parameter for binomial family taken to be 1)
+
+    Null deviance: 928.72  on 669  degrees of freedom
+Residual deviance: 475.25  on 667  degrees of freedom
+AIC: 481.25
+
+Number of Fisher Scoring iterations: 6
+
+
+### Como visto na matriz de correlações, x1 tem sinal positivo, ou seja, tem um impacto positivo no modelo, levando a decisão mais próxima de 1
+## e a variável x2 tem sinal negativo, levando a decisão mais próxima de 0, com maior intensidade se comparado a x1 (3x mais)
+##É bom lembrar que ambas variáveis tem significância estatistica se considerarmos p-value de 5%
+
+##Matriz de confusão
+matriz_confusao <- confusionMatrix(table(predict(model_class, type = "response") >= 0.5,
+                      df_class$target == 1)[2:1, 2:1])
+
+Confusion Matrix and Statistics
+
+       
+        TRUE FALSE
+  TRUE   282    53
+  FALSE   57   278
+                                          
+               Accuracy : 0.8358          
+                 95% CI : (0.8056, 0.8631)
+    No Information Rate : 0.506           
+    P-Value [Acc > NIR] : <2e-16          
+                                          
+                  Kappa : 0.6716          
+                                          
+ Mcnemar's Test P-Value : 0.7748          
+                                          
+            Sensitivity : 0.8319          
+            Specificity : 0.8399          
+         Pos Pred Value : 0.8418          
+         Neg Pred Value : 0.8299          
+             Prevalence : 0.5060          
+         Detection Rate : 0.4209          
+   Detection Prevalence : 0.5000          
+      Balanced Accuracy : 0.8359          
+                                          
+       'Positive' Class : TRUE 
+
+
+###aqui é possível verificar que a acurácia do modelo é 83%. Assim como a especificidade e sensitividade estão balanceadas, não sendo necessário apelar para 
+##outros métodos estatisticos
+
+##Precisão de 84,1%
+precision <- matriz_confusao[["byClass"]][["Precision"]]
+[1] 0.841791
+##Recall de 83,1%
+recall <- matriz_confusao[["byClass"]][["Recall"]]
+[1] 0.8318584
+##F1 score de 83,6%
+F1 <- matriz_confusao[["byClass"]][["F1"]]
+[1] 0.8367953
+
+### As métricas acima nos mostra que o modelo está bem calibrado, com valores expressivos acima de 80%
+
+##Area embaixo da curva Roc de 92,1%
+roc(response = df_class$target, 
+    predictor = model_class$fitted.values)
+Setting levels: control = 0, case = 1
+Setting direction: controls < cases
+
+Call:
+roc.default(response = df_class$target, predictor = model_class$fitted.values)
+
+Data: model_class$fitted.values in 331 controls (df_class$target 0) < 339 cases (df_class$target 1).
+Area under the curve: 0.9216
+
+###Um ótimo valor de AUC_ROC, concluido ser um modelo com ótima capacidade de predição
+
+##Gráfico de impacto das variaveis explicativas
+model_class %>%
+  tidy() %>% 
+  filter(term != "(Intercept)") %>%
+  ggplot(aes(estimate, fct_reorder(term, estimate))) +
+  geom_vline(xintercept = 0, color = "gray50", lty = 2, size = 1.2) +
+  geom_errorbar(aes(
+    xmin = estimate - std.error,
+    xmax = estimate + std.error
+  ),
+  width = .2, color = "gray50", alpha = 0.7
+  ) +
+  geom_point(size = 2, color = "#85144B") +
+  labs(y = NULL, x = "Variáveis Explicativas")
+
+
+##Fazendo a predição no conjunto de teste
+predicao <- cbind(df_class_test,
+                  predict(model_class, df_class_test, type = "response")) %>% 
+  rename(predict = V2)
+predicao$predict <- ifelse(predicao$predict >= 0.5,1,0)
+
+##Matriz de confusão do conjunto de teste
+confusionMatrix(table(predicao$target,predicao$predict))

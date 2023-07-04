@@ -1,0 +1,217 @@
+  #caso regressao linear
+##Carregando a base de dados
+df_regres_train <- read.csv("/dados/gustavo_cruz/novo/regression_train.csv",
+                         sep = ",", dec = ".") 
+
+##3verificando todas as caracteristicas dos dados --- temos NA´s na base , mas não farei nenhum tipo de tratamento
+df_regres_train %>% skim
+
+#Matriz de correlações
+cor(df_regres_train, use = "complete.obs")
+##Gráfico de correlações --- É possível verificar que x1,x2 e x7 tem alta correlação positiva com a variavel target
+chart.Correlation((df_regres_train), histogram = TRUE)
+
+##Aplicando modelo de regressão linear basico, considerando que a base de dados nao tem alta complexidade
+model_regress <- lm(target ~., df_regres_train,na.action = na.omit)
+##resumo
+summary(model_regress)
+Call:
+lm(formula = target ~ ., data = df_regres_train, na.action = na.omit)
+
+Residuals:
+   Min     1Q Median     3Q    Max 
+-518.4 -332.6 -138.4  231.3 3314.9 
+
+Coefficients: (1 not defined because of singularities)
+            Estimate Std. Error t value Pr(>|t|)    
+(Intercept) -226.992    248.170  -0.915    0.361    
+X1            97.055      6.646  14.604  < 2e-16 ***
+X2           432.938      5.842  74.108  < 2e-16 ***
+X3            18.536      4.270   4.341 1.63e-05 ***
+X4           -61.279      6.980  -8.780  < 2e-16 ***
+X5             2.914      1.820   1.600    0.110    
+X6            -3.002      5.345  -0.562    0.574    
+X7                NA         NA      NA       NA    
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 461 on 708 degrees of freedom
+  (327 observations deleted due to missingness)
+Multiple R-squared:  0.917,	Adjusted R-squared:  0.9163 
+F-statistic:  1303 on 6 and 708 DF,  p-value: < 2.2e-16
+
+
+###91,7% de R2 e apenas as variáveis x1,x2,x3 e x4 possuem significância estatistica. Vamos aplicar o método Stepwise posteriormente
+
+##teste de normalidade dos residuos
+nortest::sf.test(model_regress$residuals)
+Shapiro-Francia normality test
+
+data:  model_regress$residuals
+W = 0.80968, p-value < 2.2e-16
+##p-value significante à 5%
+
+## Aplicação do método Stepwise para filtragem de variaveis que nao são estatisticamente significativas
+model_regress_step <- stats::step(model_regress, k =3.84)
+#resumo
+summary(model_regress_step)
+Call:
+lm(formula = target ~ X1 + X2 + X3 + X4, data = df_regres_train, 
+    na.action = na.omit)
+
+Residuals:
+   Min     1Q Median     3Q    Max 
+-499.6 -334.2 -144.5  223.9 3327.3 
+
+Coefficients:
+            Estimate Std. Error t value Pr(>|t|)    
+(Intercept) -435.700    215.703  -2.020   0.0438 *  
+X1            97.344      6.645  14.649  < 2e-16 ***
+X2           432.258      5.832  74.116  < 2e-16 ***
+X3            18.673      4.272   4.371 1.42e-05 ***
+X4           -61.779      6.972  -8.861  < 2e-16 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 461.3 on 710 degrees of freedom
+  (327 observations deleted due to missingness)
+Multiple R-squared:  0.917,	Adjusted R-squared:  0.9162 
+F-statistic:  1951 on 4 and 710 DF,  p-value: < 2.2e-16
+
+##R2 se manteve, mas apenas ficaram as variaveis citadas anteriormente. tendo x1,x2 e x3 como impacto positivo, para crescimento da variavel target, e x4 negativo, 
+##para queda.
+
+##TEste de heterocedasticidade - variancia dos erros constante ou não
+olsrr::ols_test_breusch_pagan(model_regress_step)
+Breusch Pagan Test for Heteroskedasticity
+ -----------------------------------------
+ Ho: the variance is constant            
+ Ha: the variance is not constant        
+
+               Data                
+ ----------------------------------
+ Response : target 
+ Variables: fitted values of target 
+
+         Test Summary          
+ ------------------------------
+ DF            =    1 
+ Chi2          =    489.6217 
+ Prob > Chi2   =    1.7224e-108 
+
+### neste caso o teste não passou pois para evitarmos a heterocedasticidade precisamos de prob > CHI2 > 5%. 
+## um método para evitarmos isto é avaliar o comportamento da variavel target utilizando a transformação de Box-Cox, que captura não linearidade da target
+
+##calculando o lambda de Box-Cox
+lambda_BC <- powerTransform(df_regres_train$target)
+lambda_BC
+Estimated transformation parameter 
+df_regres_train$target 
+             0.2478458
+
+###Como o lambda de box-cox é diferente de zero, devemos avaliar um novo modelo utilizando o lambda como target
+###formula de transformação
+df_regres_train$bctarget <- (((df_regres_train$target ^ lambda_BC$lambda) - 1) / 
+                                   lambda_BC$lambda)
+##novo modelo
+model_bc_regress <- lm(bctarget ~. -target, df_regres_train)
+##resumo
+summary(model_bc_regress)
+Call:
+lm(formula = bctarget ~ . - target, data = df_regres_train)
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-8.3957 -0.5126  0.6902  1.2353  2.0222 
+
+Coefficients: (1 not defined because of singularities)
+             Estimate Std. Error t value Pr(>|t|)    
+(Intercept)  3.993278   0.984467   4.056 5.54e-05 ***
+X1           0.542377   0.026362  20.574  < 2e-16 ***
+X2           1.961993   0.023174  84.662  < 2e-16 ***
+X3           0.156605   0.016940   9.245  < 2e-16 ***
+X4          -0.216769   0.027688  -7.829 1.80e-14 ***
+X5          -0.009046   0.007222  -1.253    0.211    
+X6           0.012084   0.021201   0.570    0.569    
+X7                 NA         NA      NA       NA    
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 1.829 on 708 degrees of freedom
+  (327 observations deleted due to missingness)
+Multiple R-squared:  0.9384,	Adjusted R-squared:  0.9379 
+F-statistic:  1799 on 6 and 708 DF,  p-value: < 2.2e-16
+
+###o novo modelo capturou com maior precisão o comportamento da variável target, inclusive aumentou o R2 para 93,8%
+
+##aplicando o método stepwise
+model_bc_regress_step <- stats::step(model_bc_regress, k =3.84)
+summary(model_bc_regress_step)
+Call:
+lm(formula = bctarget ~ X1 + X2 + X3 + X4, data = df_regres_train)
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-8.3142 -0.5103  0.6688  1.2472  1.9595 
+
+Coefficients:
+            Estimate Std. Error t value Pr(>|t|)    
+(Intercept)  4.65402    0.85507   5.443 7.23e-08 ***
+X1           0.54154    0.02634  20.558  < 2e-16 ***
+X2           1.96422    0.02312  84.960  < 2e-16 ***
+X3           0.15617    0.01694   9.221  < 2e-16 ***
+X4          -0.21531    0.02764  -7.791 2.37e-14 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 1.829 on 710 degrees of freedom
+  (327 observations deleted due to missingness)
+Multiple R-squared:  0.9383,	Adjusted R-squared:  0.9379 
+F-statistic:  2697 on 4 and 710 DF,  p-value: < 2.2e-16
+
+##normalidade dos resiudos
+nortest::sf.test(model_bc_regress_step$residuals)
+Shapiro-Francia normality test
+
+data:  model_bc_regress_step$residuals
+W = 0.78442, p-value < 2.2e-16
+##normalidade dos residuos constatada
+
+##teste de heterocedasticidade
+olsrr::ols_test_breusch_pagan(model_bc_regress_step)
+ Breusch Pagan Test for Heteroskedasticity
+ -----------------------------------------
+ Ho: the variance is constant            
+ Ha: the variance is not constant        
+
+                Data                 
+ ------------------------------------
+ Response : bctarget 
+ Variables: fitted values of bctarget 
+
+        Test Summary         
+ ----------------------------
+ DF            =    1 
+ Chi2          =    0.4910898 
+ Prob > Chi2   =    0.4834416 
+
+##desta vez o modelo passou no teste, podemos assegurar que o modelo tem boa capacidade de predição
+
+###carregando o arquivo de teste
+df_regres_test <- fread("/dados/gustavo_cruz/novo/regression_test.csv",
+                        sep = ",",
+                        dec = ".")
+##efetuando predição
+predicao_reg <- cbind(df_regres_test, 
+                      predict(model_bc_regress_step,df_regres_test)
+                      )
+###calculo reverso da transformação de box-cox
+predicao_reg$yhat_step_modelo_bc <- (((predicao_reg$V2*(lambda_BC$lambda))+
+                                    1))^(1/(lambda_BC$lambda))
+###RMSE 
+RMSE(predicao_reg$yhat_step_modelo_bc,predicao_reg$target, na.rm = T)
+[1] 539.1123
+###Correlação target observada x prevista
+cor(predicao_reg$target,predicao_reg$yhat_step_modelo_bc,
+  use = "complete.obs")
+[1] 0.9649221

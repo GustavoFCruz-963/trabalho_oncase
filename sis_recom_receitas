@@ -1,0 +1,102 @@
+###Carga do arquivo de receitas
+filepath<-"/dados/gustavo_cruz/novo/receitas.json"
+receitas <- jsonlite::fromJSON(filepath, simplifyVector = T, flatten = T)%>%
+  map_if(is.data.frame, list) %>% 
+  as_tibble() %>%
+  distinct(title, .keep_all = T)
+
+##dataframe de ratings
+rating <- receitas %>% dplyr::select(title,rating)
+##Desfaz a lista de categorias
+unlisted <- str_trim(unlist(receitas$categories))
+
+# Quebra a lista, utilizando a virgula como referência de separação
+split_unlisted <- split(unlisted, 
+                        rep(receitas$title, sapply(receitas$categories, length)))
+
+unvectorized <- sapply(split_unlisted, toString)
+
+# Novo dataframe com as categorias separadas
+df_unvectorized <- data.frame(title = names(unvectorized), 
+                              tags = unvectorized) 
+
+##Aplicando o método one hot encoding para transformar as variáveis categóricas
+##em binárias
+final <- df_unvectorized %>% cbind(
+  qdapTools::mtabulate(str_split(df_unvectorized$tags, "\\,"))) 
+
+##Agregando o titulo das receitas ao dataframe com variaveis binarias
+final_rating <- final %>% left_join(rating, by = "title") %>% unique()
+final_rating_clean <- final_rating %>% dplyr::select(-tags,-rating)
+
+###Matriz para criação do modelo de recomendação
+matriz <- final_rating_clean %>%
+  column_to_rownames(var = "title") %>%
+  as.matrix() %>%
+  as("binaryRatingMatrix")
+##capturando as categorias em dataframe
+categorias <- matriz %>% colnames() %>% as_tibble()
+
+##modelo de recomendação IBCF, filtragem colaborativa
+recom <- Recommender(matriz, method = "IBCF",param = list(n=5))
+
+
+###Função que recebe um vetor contendo as categorias que o cliente busca e 
+###retorna as top 5 receitas, classificadas pelas respectivas avaliações
+avaliacao <- function(x){
+  
+  ##3Cria uma matriz das categorias indicadas pelo usuario
+  categ_choice_matriz <- categorias %>% 
+  mutate(categ = as.numeric(value %in% x)) %>%
+  pivot_wider(names_from = value, values_from = categ) %>%
+  as.matrix() %>%
+  as("binaryRatingMatrix")
+  
+  ##efetua a predição considerando as avaliações das receitas
+  pred <- predict(recom, newdata=categ_choice_matriz, n =1, type = "ratingMatrix")
+  ##captura a lista de favoritos
+  favorite <- getList(pred) %>% unlist() %>% as.data.frame() %>%
+    rownames_to_column() %>% rename(score='.',tag = rowname) %>% 
+    arrange(desc(score)) %>% 
+    slice_head(n=5)
+  
+    favorite$tag <- gsub("0.", "", favorite$tag)
+  ##considera apenas as top 5 receitas
+  top5 <- suppressWarnings(final_rating %>% 
+    filter(str_detect(final_rating$tags,favorite$tag) == T) %>% 
+    dplyr::select(title,rating) %>% arrange(desc(rating)) %>% 
+    slice_head(n=5))
+  
+  return(top5)
+}
+
+###Avaliação
+cliente1 <- c("Vegan", "Vegetarian", "Tofu","Potato", "Tomato")
+cliente2 <- c("Meat", "Beer", "Bacon", "Cheese", "Tomato")
+cliente3 <- c("Chicken", "Lettuce", "Zuchinni", "Smoked", "Potato")
+
+print(avaliacao(cliente1))
+                                                           title rating
+1 Vegetarian Brown Rice Salad With Parsnips and Whipped Ricotta   5.000
+2                                        Okra Cornmeal Fritters   4.375
+3                             Sauteed Okra with Tomato and Corn   4.375
+4                     Ricotta-Pumpkin Gnocchi With Brown Butter   3.125
+5                                             Vegetable Rundown   3.125
+print(avaliacao(cliente2))
+                                              title rating
+1                       Brisket Braised in Porter   5.000
+2 Poached Fish with Spinach in Chili-Tomato Sauce   5.000
+3  Spelt Spaghetti, Vine Tomatoes & Baked Ricotta   5.000
+4                      Texas-Style Smoked Brisket   5.000
+5                     Belgian Ale-Braised Brisket   4.375
+
+print(avaliacao(cliente3))
+                                                                 title rating
+1                                                     Chicken Marsala       5
+2                              Chicken with Lemons and Olives Emshmel       5
+3                                      Cider-Brined-and-Glazed Turkey       5
+4 Crispy Salt and Pepper Chicken with Caramelized Fennel and Shallots       5
+5                                                       Duck Bigarade       5
+
+
+####Resultados entregam as receitas mais bem classificadas e que possuem as tags mencionadas peloos clientes
